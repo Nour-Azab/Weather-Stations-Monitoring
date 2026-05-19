@@ -1,0 +1,68 @@
+# ── Central Station Service ───────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: central-station
+  labels:
+    app: central-station
+spec:
+  selector:
+    app: central-station
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: ClusterIP
+
+---
+# ── Central Station Deployment (1 replica) ───────────────────────────────────
+# Using Deployment instead of bare Pod so it restarts automatically on crash.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: central-station
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: central-station
+  template:
+    metadata:
+      labels:
+        app: central-station
+    spec:
+      # Wait for Kafka to be reachable before starting
+      initContainers:
+        - name: wait-for-kafka
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z kafka 9092; do
+                echo "Waiting for Kafka..."
+                sleep 2
+              done
+              echo "Kafka is up."
+
+      containers:
+        - name: central-station
+          image: central-station:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            # Spring Boot picks this up automatically to override application.yml
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:9092
+            # Override storage paths to use the mounted PVC
+            - name: BITCASK_STORAGE_PATH
+              value: /data/bitcask
+            - name: PARQUET_STORAGE_PATH
+              value: /data/parquet
+          volumeMounts:
+            - name: data
+              mountPath: /data
+
+      volumes:
+        - name: data
+          emptyDir: {}

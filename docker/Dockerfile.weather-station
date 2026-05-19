@@ -1,0 +1,26 @@
+# ── Stage 1: build ──────────────────────────────────────────────────────────
+FROM maven:3.9.8-eclipse-temurin-21 AS build
+WORKDIR /workspace
+
+# Copy the parent POM first (weather-station/pom.xml references it)
+COPY pom.xml /workspace/pom.xml
+COPY weather-station /workspace/weather-station
+COPY central-station /workspace/central-station
+
+# Build only the weather-station module; parent POM is now resolvable locally
+RUN mvn -f /workspace/pom.xml -pl weather-station -am -DskipTests package
+
+# ── Stage 2: runtime ─────────────────────────────────────────────────────────
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+
+COPY --from=build /workspace/weather-station/target/weather-station-shaded.jar /app/weather-station-shaded.jar
+
+# Defaults – all overridable via K8s env or docker run -e
+ENV STATION_ID=1
+ENV KAFKA_BROKER=localhost:9092
+ENV KAFKA_TOPIC=weather-readings
+
+# WeatherStation.java already reads STATION_ID / KAFKA_BROKER / KAFKA_TOPIC
+# from env when the property is blank, so no config file needed.
+ENTRYPOINT ["java", "-cp", "/app/weather-station-shaded.jar", "com.weather.station.WeatherStation"]
