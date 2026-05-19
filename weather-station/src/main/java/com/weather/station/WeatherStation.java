@@ -23,15 +23,35 @@ public class WeatherStation {
             return;
         }
 
-        long stationId = Long.parseLong(props.getProperty("station_id", "1"));
-        String topic   = props.getProperty("kafka.topic");
-        String broker  = props.getProperty("kafka.broker");
+        String stationIdValue = System.getenv("STATION_ID");
+        if (stationIdValue == null || stationIdValue.isBlank()) {
+            stationIdValue = props.getProperty("station_id");
+        }
+        if (stationIdValue == null || stationIdValue.isBlank()) {
+            stationIdValue = "1";
+        }
+        final long stationId = Long.parseLong(stationIdValue);
 
-        // Problem 3 fix: imports added above
-        // Problem 1 fix: scheduler is now INSIDE main()
-        KafkaProducerService producer = new KafkaProducerService(broker, stationId);
+        String _topic = System.getenv("KAFKA_TOPIC");
+        if (_topic == null || _topic.isBlank()) {
+            _topic = props.getProperty("kafka.topic");
+        }
+        if (_topic == null || _topic.isBlank()) {
+            _topic = "weather-readings";
+        }
+        final String topic = _topic;
 
-        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        String broker = System.getenv("KAFKA_BROKER");
+        if (broker == null || broker.isBlank()) {
+            broker = props.getProperty("kafka.broker");
+        }
+        if (broker == null || broker.isBlank()) {
+            broker = "localhost:9092";
+        }
+
+        final KafkaProducerService producer = new KafkaProducerService(broker, stationId);
+
+        final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         scheduler.scheduleAtFixedRate(() -> {
 
             String message = MessageGenerator.generate(stationId);

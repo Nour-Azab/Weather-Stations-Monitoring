@@ -26,4 +26,13 @@ public class WeatherData {
     public void setWindSpeed(int windSpeed) {
         this.windSpeed = windSpeed;
     }
+
+    @Override
+    public String toString() {
+        return "WeatherData{" +
+                "humidity=" + humidity +
+                ", temperature=" + temperature +
+                ", windSpeed=" + windSpeed +
+                '}';
+    }
 }
