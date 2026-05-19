@@ -27,3 +27,4 @@ data/bitcask/
 data/parquet/
 *.csv
 *.jfr
+/Data
