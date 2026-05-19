@@ -1,0 +1,29 @@
+# ===== IntelliJ IDEA =====
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# ===== Maven =====
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# ===== Java =====
+*.class
+*.jar
+*.war
+*.ear
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Project specific =====
+data/bitcask/
+data/parquet/
+*.csv
+*.jfr

@@ -1,0 +1,16 @@
+spring:
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      group-id: central-station
+      auto-offset-reset: earliest
+
+server:
+  port: 8080
+
+bitcask:
+  storage-path: ./data/bitcask
+
+parquet:
+  storage-path: ./data/parquet
+  batch-size: 10000
