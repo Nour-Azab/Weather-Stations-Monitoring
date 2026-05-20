@@ -18,7 +18,10 @@ public class BitcaskStore {
     private long currentFileSequence = 0;
 
     public BitcaskStore() throws IOException {
-        this.dataDir = "Data";
+        // Read from env variable, fall back to ./data/bitcask
+        String envPath = System.getenv("BITCASK_STORAGE_PATH");
+        this.dataDir = (envPath != null && !envPath.isEmpty()) ? envPath : "./data/bitcask";
+
         this.maxSegmentSize = 1024; // 64MB default segment size
 
         // Ensure the database directory exists
@@ -62,21 +65,20 @@ public class BitcaskStore {
                         currentFileSequence = id;
                     }
 
-                    
                 } catch (NumberFormatException e) {
                     // Ignore files that don't match our numeric format
                 }
                 // Open it as an old read-only/immutable segment
-                    Segment seg = new Segment(idStr, f.getAbsolutePath());
-                    segments.put(idStr, seg);
-                    File HintFile = new File(dataDir + File.separator + idStr + ".hint");
+                Segment seg = new Segment(idStr, f.getAbsolutePath());
+                segments.put(idStr, seg);
+                File HintFile = new File(dataDir + File.separator + idStr + ".hint");
 
-                    if (HintFile.exists()) {
-                        HintFile hintFile = new HintFile(HintFile.getAbsolutePath());
-                        hintFile.loadIntoKeyDir(idStr, this.keyDir);
-                    } else {
-                        loadOldSegment(f, idStr);
-                    }
+                if (HintFile.exists()) {
+                    HintFile hintFile = new HintFile(HintFile.getAbsolutePath());
+                    hintFile.loadIntoKeyDir(idStr, this.keyDir);
+                } else {
+                    loadOldSegment(f, idStr);
+                }
             }
         }
 

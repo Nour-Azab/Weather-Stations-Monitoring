@@ -65,4 +65,5 @@ spec:
 
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:        # ← changed from emptyDir: {}
+            claimName: central-data-pvc

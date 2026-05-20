@@ -152,3 +152,19 @@ kubectl apply -f k8s/weather-station.yaml
 
 kubectl get pods -w
 ```
+
+```
+# ✅ Safe restart (data survives):
+kubectl delete pod <central-station-pod>
+# K8s automatically creates a new pod, PVC still there, data still there
+
+# ✅ Safe redeploy (data survives):
+kubectl delete -f k8s/central-station.yaml
+kubectl delete -f k8s/weather-station.yaml
+kubectl delete -f k8s/kafka.yaml
+# Then reapply — PVC still exists, data still there
+
+# ❌ Full wipe (data gone):
+kubectl delete -f k8s/
+# This deletes the PVC too — all BitCask and Parquet files gone
+```
