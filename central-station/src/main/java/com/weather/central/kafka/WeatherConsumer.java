@@ -3,6 +3,10 @@ package com.weather.central.kafka;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.weather.central.model.WeatherMessage;
@@ -13,6 +17,7 @@ public class WeatherConsumer {
     private static final Logger logger = LoggerFactory.getLogger(WeatherConsumer.class);
     private final ObjectMapper mapper = new ObjectMapper(); // create once, reuse
     private final BitcaskService bitcaskService;
+    public static final Queue<WeatherMessage> archiveBuffer = new ConcurrentLinkedQueue<>();
 
     // Spring will automatically inject your storage service here
     public WeatherConsumer(BitcaskService bitcaskService) {
@@ -35,6 +40,7 @@ public class WeatherConsumer {
 
             // Store the raw JSON string directly into Bitcask
             bitcaskService.put(key, message);
+            archiveBuffer.add(weatherMessage);
 
         } catch (Exception e) {
             logger.error("Failed to consume message: {}", e.getMessage());
