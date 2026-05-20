@@ -1,6 +1,6 @@
 package com.weather.central.parquet;
 
-import com.weather.central.kafka.WeatherConsumer;
+import com.weather.central.kafka.ArchiveConsumer;
 import com.weather.central.model.WeatherMessage;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -27,13 +27,13 @@ public class ParquetArchiverWorker {
     @Scheduled(fixedRate = 10000)
     public void processArchiveQueue() {
         // Only flush if we hit our 1k target limit to ensure large, healthy Parquet column groups
-        if (WeatherConsumer.archiveBuffer.size() < BATCH_SIZE_THRESHOLD) {
+        if (ArchiveConsumer.archiveBuffer.size() < BATCH_SIZE_THRESHOLD) {
             return; 
         }
 
         List<WeatherMessage> batch = new ArrayList<>();
-        while (batch.size() < BATCH_SIZE_THRESHOLD && !WeatherConsumer.archiveBuffer.isEmpty()) {
-            WeatherMessage msg = WeatherConsumer.archiveBuffer.poll();
+        while (batch.size() < BATCH_SIZE_THRESHOLD && !ArchiveConsumer.archiveBuffer.isEmpty()) {
+            WeatherMessage msg = ArchiveConsumer.archiveBuffer.poll();
             if (msg != null) batch.add(msg);
         }
 
@@ -80,7 +80,7 @@ public class ParquetArchiverWorker {
         } catch (Exception e) {
             System.err.println("[ARCHIVER ERROR] Failed compiling Parquet file layer: " + e.getMessage());
             // Safe recovery: Return the items to the queue so data isn't lost on database write faults
-            WeatherConsumer.archiveBuffer.addAll(batch);
+            ArchiveConsumer.archiveBuffer.addAll(batch);
         }
     }
 }
