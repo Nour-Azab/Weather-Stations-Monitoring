@@ -131,3 +131,24 @@ kubectl apply -f k8s/weather-station.yaml
 # Step 6: Watch
 kubectl get pods -w
 ```
+
+## Desktop way
+
+```
+# Switch context to Docker Desktop
+kubectl config use-context docker-desktop
+
+# No minikube docker-env needed!
+# Just build normally
+mvn clean package -DskipTests
+docker build -f docker/Dockerfile.weather-station -t weather-station:latest .
+docker build -f docker/Dockerfile.central-station -t central-station:latest .
+
+# Deploy
+kubectl apply -f k8s/persistent-volume.yaml
+kubectl apply -f k8s/kafka.yaml
+kubectl apply -f k8s/central-station.yaml
+kubectl apply -f k8s/weather-station.yaml
+
+kubectl get pods -w
+```
