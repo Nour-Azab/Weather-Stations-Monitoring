@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.weather.central.model.WeatherMessage;
+import com.weather.central.model.ArchiveTask;
 
 import java.util.List;
 import java.util.Queue;
@@ -22,8 +23,8 @@ public class ArchiveConsumer {
     private final ObjectMapper mapper = new ObjectMapper();
     private final Object lock = new Object();
 
-    // The shared thread-safe queue checked by the background ParquetArchiverWorker
-    public static final Queue<WeatherMessage> archiveBuffer = new ConcurrentLinkedQueue<>();
+    // Now holds the integrated data payload + acknowledgment tracking bundle
+    public static final Queue<ArchiveTask> archiveBuffer = new ConcurrentLinkedQueue<>();
 
     @KafkaListener(
         topics = "weather-readings",
@@ -35,20 +36,17 @@ public class ArchiveConsumer {
         synchronized (lock) {
             for (ConsumerRecord<String, String> record : records) {
                 try {
-                    // Parse raw incoming stream string into standard object schema
                     WeatherMessage weatherMessage = mapper.readValue(record.value(), WeatherMessage.class);
-                    archiveBuffer.add(weatherMessage);
+                    
+                    // Package the individual record along with the overarching batch acknowledgment token
+                    archiveBuffer.add(new ArchiveTask(weatherMessage, ack));
                     
                 } catch (Exception e) {
                     logger.error("Failed to parse message into archive queue: {}", e.getMessage());
                 }
             }
             
-            // Acknowledge the Kafka broker immediately after dropping the chunk into our buffer.
-            // This ensures streaming throughput doesn't bottleneck on the 10-second archiver clock.
-            ack.acknowledge();
-            
-            logger.info("Current archive buffer state: {}/{} messages accumulated.", 
+            logger.info("Current archive buffer state: {}/{} tasks accumulated in memory.", 
                     archiveBuffer.size(), TARGET_BATCH_SIZE);
         }
     }

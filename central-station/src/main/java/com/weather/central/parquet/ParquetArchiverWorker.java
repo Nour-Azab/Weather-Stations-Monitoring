@@ -1,6 +1,7 @@
 package com.weather.central.parquet;
 
 import com.weather.central.kafka.ArchiveConsumer;
+import com.weather.central.model.ArchiveTask;
 import com.weather.central.model.WeatherMessage;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -23,19 +24,16 @@ public class ParquetArchiverWorker {
         if (!dir.exists()) dir.mkdirs();
     }
 
-    // Run a check every 10 seconds to look at buffer volumes
     @Scheduled(fixedRate = 10000)
     public void processArchiveQueue() {
-        // Only flush if we hit our 1k target limit to ensure large, healthy Parquet column groups
         if (ArchiveConsumer.archiveBuffer.size() < BATCH_SIZE_THRESHOLD) {
             return; 
         }
 
-        List<WeatherMessage> batch = new ArrayList<>();
-        // Safely pull up to exactly 1,000 items out of the concurrent shared memory queue
+        List<ArchiveTask> batch = new ArrayList<>();
         while (batch.size() < BATCH_SIZE_THRESHOLD && !ArchiveConsumer.archiveBuffer.isEmpty()) {
-            WeatherMessage msg = ArchiveConsumer.archiveBuffer.poll();
-            if (msg != null) batch.add(msg);
+            ArchiveTask task = ArchiveConsumer.archiveBuffer.poll();
+            if (task != null) batch.add(task);
         }
 
         if (batch.isEmpty()) return;
@@ -44,28 +42,25 @@ public class ParquetArchiverWorker {
         String parquetPath = archiveDir + File.separator + "weather_" + timestamp + ".parquet";
 
         try {
-            // --- NATIVE DRIVER REGISTRATION ---
-            // Explicitly force the JVM to load and bind the DuckDB JDBC driver architecture.
-            // This guarantees the DriverManager never drops the driver reference between execution ticks.
+            // Force class loading to prevent transient driver extraction failures across parallel threads
             Class.forName("org.duckdb.DuckDBDriver");
             
         } catch (ClassNotFoundException e) {
             System.err.println("[CRITICAL ERROR] DuckDB Dependency is missing from application classpath!");
-            // Rollback strategy: Return the extracted items back to the shared queue so no telemetry data is lost
-            ArchiveConsumer.archiveBuffer.addAll(batch);
+            ArchiveConsumer.archiveBuffer.addAll(batch); 
             return;
         }
 
-        // Load DuckDB fully in-memory to act as an execution engine
+        // Open an embedded instance of DuckDB fully in-memory
         try (Connection conn = DriverManager.getConnection("jdbc:duckdb:");
              java.sql.Statement stmt = conn.createStatement()) {
 
-            // 1. Create a structured temporary in-memory table inside DuckDB
             stmt.execute("CREATE TABLE temp_weather (station_id BIGINT, s_no BIGINT, battery_status VARCHAR, status_timestamp BIGINT, humidity INT, temperature INT, wind_speed INT);");
 
-            // 2. Prepare a high-speed batch insertion pipeline
             try (PreparedStatement pStmt = conn.prepareStatement("INSERT INTO temp_weather VALUES (?, ?, ?, ?, ?, ?, ?);")) {
-                for (WeatherMessage msg : batch) {
+                for (ArchiveTask task : batch) {
+                    WeatherMessage msg = task.getMessage(); // Extract internal payload data
+                    
                     pStmt.setLong(1, msg.getStationId());
                     pStmt.setLong(2, msg.getSno());
                     pStmt.setString(3, msg.getBatteryStatus());
@@ -82,18 +77,26 @@ public class ParquetArchiverWorker {
                     }
                     pStmt.addBatch();
                 }
-                pStmt.executeBatch(); // Executes inside raw memory layout instantly
+                pStmt.executeBatch(); 
             }
 
-            // 3. Trigger the DuckDB SQL Query to export directly to a compressed columnar Parquet file
+            // Export memory relational grid to compressed columnar Parquet format
             String exportSql = String.format("COPY temp_weather TO '%s' (FORMAT 'PARQUET', COMPRESSION 'ZSTD');", parquetPath);
             stmt.execute(exportSql);
             
-            System.out.println("[ARCHIVER] Successfully compiled and wrote " + batch.size() + " rows to columnar storage: " + parquetPath);
+            System.out.println("[ARCHIVER] Successfully compiled and wrote " + batch.size() + " rows to " + parquetPath);
+
+            // --- LATE ACKNOWLEDGMENT TRANSACTION FINALIZATION ---
+            // Only after the disk operation completes without exceptions do we notify Kafka.
+            // Spring Kafka optimizes this call so invoking it multiple times on the same batch context is completely safe.
+            for (ArchiveTask task : batch) {
+                task.getAck().acknowledge();
+            }
+            System.out.println("[ARCHIVER] Successfully committed Kafka offsets for the exported storage batch.");
 
         } catch (Exception e) {
             System.err.println("[ARCHIVER ERROR] Failed compiling Parquet file layer: " + e.getMessage());
-            // Rollback strategy: If DuckDB query failures occur, dump items back into the queue for the next scheduled pass
+            // Rollback strategy: On exceptions, safely return tasks to the queue to try again on the next tick
             ArchiveConsumer.archiveBuffer.addAll(batch);
         }
     }
