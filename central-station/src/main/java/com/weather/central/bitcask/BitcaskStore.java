@@ -22,7 +22,7 @@ public class BitcaskStore {
         String envPath = System.getenv("BITCASK_STORAGE_PATH");
         this.dataDir = (envPath != null && !envPath.isEmpty()) ? envPath : "./data/bitcask";
 
-        this.maxSegmentSize = 1024; // 64MB default segment size
+        this.maxSegmentSize = 10 * 1024; // 64MB default segment size
 
         // Ensure the database directory exists
         File dir = new File(dataDir);
