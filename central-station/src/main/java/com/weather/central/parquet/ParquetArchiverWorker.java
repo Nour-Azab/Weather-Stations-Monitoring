@@ -32,6 +32,7 @@ public class ParquetArchiverWorker {
         }
 
         List<WeatherMessage> batch = new ArrayList<>();
+        // Safely pull up to exactly 1,000 items out of the concurrent shared memory queue
         while (batch.size() < BATCH_SIZE_THRESHOLD && !ArchiveConsumer.archiveBuffer.isEmpty()) {
             WeatherMessage msg = ArchiveConsumer.archiveBuffer.poll();
             if (msg != null) batch.add(msg);
@@ -41,6 +42,19 @@ public class ParquetArchiverWorker {
 
         long timestamp = System.currentTimeMillis();
         String parquetPath = archiveDir + File.separator + "weather_" + timestamp + ".parquet";
+
+        try {
+            // --- NATIVE DRIVER REGISTRATION ---
+            // Explicitly force the JVM to load and bind the DuckDB JDBC driver architecture.
+            // This guarantees the DriverManager never drops the driver reference between execution ticks.
+            Class.forName("org.duckdb.DuckDBDriver");
+            
+        } catch (ClassNotFoundException e) {
+            System.err.println("[CRITICAL ERROR] DuckDB Dependency is missing from application classpath!");
+            // Rollback strategy: Return the extracted items back to the shared queue so no telemetry data is lost
+            ArchiveConsumer.archiveBuffer.addAll(batch);
+            return;
+        }
 
         // Load DuckDB fully in-memory to act as an execution engine
         try (Connection conn = DriverManager.getConnection("jdbc:duckdb:");
@@ -71,15 +85,15 @@ public class ParquetArchiverWorker {
                 pStmt.executeBatch(); // Executes inside raw memory layout instantly
             }
 
-            // 3. Trigger the magic DuckDB SQL Query to export directly to a compressed columnar Parquet file!
+            // 3. Trigger the DuckDB SQL Query to export directly to a compressed columnar Parquet file
             String exportSql = String.format("COPY temp_weather TO '%s' (FORMAT 'PARQUET', COMPRESSION 'ZSTD');", parquetPath);
             stmt.execute(exportSql);
             
-            System.out.println("[ARCHIVER] Successfully compiled and wrote " + batch.size() + " rows to " + parquetPath);
+            System.out.println("[ARCHIVER] Successfully compiled and wrote " + batch.size() + " rows to columnar storage: " + parquetPath);
 
         } catch (Exception e) {
             System.err.println("[ARCHIVER ERROR] Failed compiling Parquet file layer: " + e.getMessage());
-            // Safe recovery: Return the items to the queue so data isn't lost on database write faults
+            // Rollback strategy: If DuckDB query failures occur, dump items back into the queue for the next scheduled pass
             ArchiveConsumer.archiveBuffer.addAll(batch);
         }
     }
