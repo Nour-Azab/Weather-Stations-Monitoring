@@ -1,5 +1,4 @@
 # ── PersistentVolume (hostPath – works with minikube / Docker Desktop) ────────
-# Shared storage for Parquet files and BitCask segments written by central-station.
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -10,11 +9,10 @@ spec:
   accessModes:
     - ReadWriteOnce
   hostPath:
-    path: /tmp/weather-data # minikube maps this to the node's /tmp
+    path: /data/weather-data    # ← changed from /tmp/weather-data
   persistentVolumeReclaimPolicy: Retain
 
 ---
-# ── PersistentVolumeClaim (claimed by central-station pod) ───────────────────
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
