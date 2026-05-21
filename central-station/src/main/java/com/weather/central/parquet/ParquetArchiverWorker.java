@@ -10,8 +10,13 @@ import java.io.File;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class ParquetArchiverWorker {
@@ -41,74 +46,88 @@ public class ParquetArchiverWorker {
         if (batch.isEmpty())
             return;
 
-        long timestamp = System.currentTimeMillis();
-        String parquetPath = archiveDir + File.separator + "weather_" + timestamp + ".parquet";
-
         try {
-            // Force class loading to prevent transient driver extraction failures across
-            // parallel threads
             Class.forName("org.duckdb.DuckDBDriver");
-
         } catch (ClassNotFoundException e) {
             System.err.println("[CRITICAL ERROR] DuckDB Dependency is missing from application classpath!");
             ArchiveConsumer.archiveBuffer.addAll(batch);
             return;
         }
 
-        // Open an embedded instance of DuckDB fully in-memory
+        // ── STEP 1: GROUP THE BATCH BY HIVE PARTITION PATHS ──────────────────
+        Map<String, List<ArchiveTask>> partitionedBatches = new HashMap<>();
+        
+        for (ArchiveTask task : batch) {
+            WeatherMessage msg = task.getMessage();
+            
+            // Parse timestamp to UTC Date components
+            ZonedDateTime zdt = Instant.ofEpochSecond(msg.getStatusTimestamp()).atZone(ZoneId.of("UTC"));
+            
+            String partitionPath = String.format("year=%04d/month=%02d/day=%02d/station_id=%d",
+                    zdt.getYear(), zdt.getMonthValue(), zdt.getDayOfMonth(), msg.getStationId());
+            
+            partitionedBatches.computeIfAbsent(partitionPath, k -> new ArrayList<>()).add(task);
+        }
+
+        // ── STEP 2: WRITE EACH PARTITION TO ITS OWN FOLDER ───────────────────
         try (Connection conn = DriverManager.getConnection("jdbc:duckdb:");
                 java.sql.Statement stmt = conn.createStatement()) {
 
-            stmt.execute(
-                    "CREATE TABLE temp_weather (station_id BIGINT, s_no BIGINT, battery_status VARCHAR, status_timestamp BIGINT, humidity INT, temperature INT, wind_speed INT);");
+            long timestamp = System.currentTimeMillis();
 
-            try (PreparedStatement pStmt = conn
-                    .prepareStatement("INSERT INTO temp_weather VALUES (?, ?, ?, ?, ?, ?, ?);")) {
-                for (ArchiveTask task : batch) {
-                    WeatherMessage msg = task.getMessage(); // Extract internal payload data
+            for (Map.Entry<String, List<ArchiveTask>> entry : partitionedBatches.entrySet()) {
+                String partitionPath = entry.getKey();
+                List<ArchiveTask> subBatch = entry.getValue();
 
-                    pStmt.setLong(1, msg.getStationId());
-                    pStmt.setLong(2, msg.getSno());
-                    pStmt.setString(3, msg.getBatteryStatus());
-                    pStmt.setLong(4, msg.getStatusTimestamp());
-
-                    if (msg.getWeather() != null) {
-                        pStmt.setInt(5, msg.getWeather().getHumidity());
-                        pStmt.setInt(6, msg.getWeather().getTemperature());
-                        pStmt.setInt(7, msg.getWeather().getWindSpeed());
-                    } else {
-                        pStmt.setNull(5, java.sql.Types.INTEGER);
-                        pStmt.setNull(6, java.sql.Types.INTEGER);
-                        pStmt.setNull(7, java.sql.Types.INTEGER);
-                    }
-                    pStmt.addBatch();
+                // Create partition directory tree layout
+                File targetPartitionDir = new File(archiveDir, partitionPath);
+                if (!targetPartitionDir.exists()) {
+                    targetPartitionDir.mkdirs();
                 }
-                pStmt.executeBatch();
+
+                String parquetPath = targetPartitionDir.getAbsolutePath() + File.separator + "weather_" + timestamp + ".parquet";
+
+                // Reset temporary table for fresh sub-batch write
+                stmt.execute("DROP TABLE IF EXISTS temp_weather;");
+                stmt.execute("CREATE TABLE temp_weather (station_id BIGINT, s_no BIGINT, battery_status VARCHAR, status_timestamp BIGINT, humidity INT, temperature INT, wind_speed INT);");
+
+                try (PreparedStatement pStmt = conn.prepareStatement("INSERT INTO temp_weather VALUES (?, ?, ?, ?, ?, ?, ?);")) {
+                    for (ArchiveTask task : subBatch) {
+                        WeatherMessage msg = task.getMessage();
+                        pStmt.setLong(1, msg.getStationId());
+                        pStmt.setLong(2, msg.getSno());
+                        pStmt.setString(3, msg.getBatteryStatus());
+                        pStmt.setLong(4, msg.getStatusTimestamp());
+
+                        if (msg.getWeather() != null) {
+                            pStmt.setInt(5, msg.getWeather().getHumidity());
+                            pStmt.setInt(6, msg.getWeather().getTemperature());
+                            pStmt.setInt(7, msg.getWeather().getWindSpeed());
+                        } else {
+                            pStmt.setNull(5, java.sql.Types.INTEGER);
+                            pStmt.setNull(6, java.sql.Types.INTEGER);
+                            pStmt.setNull(7, java.sql.Types.INTEGER);
+                        }
+                        pStmt.addBatch();
+                    }
+                    pStmt.executeBatch();
+                }
+
+                // Export memory grid to localized partition path location
+                String exportSql = String.format("COPY temp_weather TO '%s' (FORMAT 'PARQUET', COMPRESSION 'ZSTD');", parquetPath);
+                stmt.execute(exportSql);
+                System.out.println("[ARCHIVER] Wrote " + subBatch.size() + " rows to partitioned track: " + parquetPath);
             }
 
-            // Export memory relational grid to compressed columnar Parquet format
-            String exportSql = String.format("COPY temp_weather TO '%s' (FORMAT 'PARQUET', COMPRESSION 'ZSTD');",
-                    parquetPath);
-            stmt.execute(exportSql);
-
-            System.out
-                    .println("[ARCHIVER] Successfully compiled and wrote " + batch.size() + " rows to " + parquetPath);
-
-            // --- LATE ACKNOWLEDGMENT TRANSACTION FINALIZATION ---
-            // Only after the disk operation completes without exceptions do we notify
-            // Kafka.
-            // Spring Kafka optimizes this call so invoking it multiple times on the same
-            // batch context is completely safe.
+            // ── STEP 3: ACKNOWLEDGE ALL KAFKA MESSAGES AT ONCE ───────────────
             for (ArchiveTask task : batch) {
                 task.getAck().acknowledge();
             }
-            System.out.println("[ARCHIVER] Successfully committed Kafka offsets for the exported storage batch.");
+            System.out.println("[ARCHIVER] Successfully committed Kafka offsets for the partitioned storage batch.");
 
         } catch (Exception e) {
             System.err.println("[ARCHIVER ERROR] Failed compiling Parquet file layer: " + e.getMessage());
-            // Rollback strategy: On exceptions, safely return tasks to the queue to try
-            // again on the next tick
-            ArchiveConsumer.archiveBuffer.addAll(batch);
+            ArchiveConsumer.archiveBuffer.addAll(batch); // Rollback
         }
     }
 }
