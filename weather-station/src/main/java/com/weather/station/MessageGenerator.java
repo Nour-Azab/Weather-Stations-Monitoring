@@ -55,6 +55,7 @@ public class MessageGenerator {
 
     // ── Public entry point ────────────────────────────────────────────────
     public static String generate(long stationId) {
+        counter++;
         if (Math.random() < 0.10)
             return null; // 10% drop
 
@@ -135,7 +136,6 @@ public class MessageGenerator {
             // Build message using cached data
             double r = Math.random();
             String battery = r < 0.30 ? "low" : r < 0.70 ? "medium" : "high";
-            counter++;
             long timestamp = System.currentTimeMillis() / 1000;
 
             return objectMapper.writeValueAsString(
@@ -150,7 +150,6 @@ public class MessageGenerator {
 
     // ── Mock / fake data ──────────────────────────────────────────────────
     private static String generateMock(long stationId) {
-        counter++;
         double r = Math.random();
         String battery = r < 0.30 ? "low" : r < 0.70 ? "medium" : "high";
         int humidity = (int) (Math.random() * 101);

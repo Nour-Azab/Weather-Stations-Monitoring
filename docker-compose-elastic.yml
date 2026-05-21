@@ -17,7 +17,7 @@ services:
     environment:
       - discovery.type=single-node          # no cluster needed for dev
       - xpack.security.enabled=false        # disable TLS/auth so it's easy to use
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m     # limit RAM; raise if you have more
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g     # limit RAM; raise if you have more
       - "cluster.name=weather-cluster"
     ports:
       - "9200:9200"
@@ -25,9 +25,10 @@ services:
       - es_data:/usr/share/elasticsearch/data
     healthcheck:
       test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\\|yellow\"'"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
+      interval: 20s
+      timeout: 15s
+      retries: 15
+      start_period: 60s
 
   # ── Kibana ───────────────────────────────────────────────────────────────────
   kibana:

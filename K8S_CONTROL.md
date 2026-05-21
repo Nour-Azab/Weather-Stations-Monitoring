@@ -2,7 +2,7 @@
 
 ```
 # Step 1: Point terminal to Minikube's Docker
-minikube docker-env | Invoke-Expression
+eval $(minikube docker-env)
 
 # Step 2: Verify you're now inside Minikube's Docker
 # (you should see Minikube's images, NOT your Windows ones)
@@ -45,4 +45,19 @@ kubectl delete -f k8s/
 ## Mount
 
 minikube mount ./Archive:/data/weather-data/parquet
+minikube mount ./data:/data/weather-data/bitcask
 minikube image load central-station:latest
+
+
+## Bash
+kubectl exec -it central-station-7565cd47dd-fk26m  -- /bin/bash
+
+## Logs
+kubectl logs central-station-7565cd47dd-fk26m  -f
+
+## JFR yml config
+- name: JAVA_TOOL_OPTIONS
+              value: "-XX:StartFlightRecording=duration=60s,filename=/data/profile.jfr"
+
+## Copy JFR
+kubectl cp <NEW_POD_NAME>:/data/profile.jfr ./profile.jfr -c central-station
