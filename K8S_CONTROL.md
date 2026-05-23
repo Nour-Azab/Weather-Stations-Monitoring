@@ -1,105 +1,63 @@
-# Kubernetes Control Guide
+## Minikube Way (the Previous was KIND)
 
-This guide explains how to turn off and turn on the local Kubernetes environment used by this project.
-
-## Cluster name
-
-The example cluster name used in this repo is:
-
-- `weather-dev`
-
-If you created a different name, replace `weather-dev` with your cluster name.
-
----
-
-## Turn off Kubernetes
-
-### Recommended: delete the kind cluster
-
-This is the cleanest way to stop Kubernetes and remove the local cluster state.
-
-```powershell
-kind delete cluster --name weather-dev
 ```
+# Step 1: Point terminal to Minikube's Docker
+eval $(minikube docker-env)
 
-### Alternative: stop the kind node container
+# Step 2: Verify you're now inside Minikube's Docker
+# (you should see Minikube's images, NOT your Windows ones)
+docker images
 
-If you want to pause the cluster without deleting it, stop the Docker container(s) for the kind node(s):
+# Step 3: Build images INSIDE Minikube
+mvn clean package -DskipTests
+docker build -f docker/Dockerfile.weather-station -t weather-station:latest .
+docker build -f docker/Dockerfile.central-station -t central-station:latest .
 
-```powershell
-docker ps --filter "name=weather-dev" --format "{{.Names}}"
-docker stop <node-name>
-```
+# Step 4: Delete old broken pods
+kubectl delete -f k8s/
 
-Common node names include:
-
-- `weather-dev-control-plane`
-- `weather-dev-worker` (if present)
-
-> Note: stopping the container may make the cluster unavailable, but it preserves the cluster metadata. If you want a clean restart, delete and recreate instead.
-
----
-
-## Turn on Kubernetes
-
-### If you deleted the cluster
-
-Recreate the local kind cluster:
-
-```powershell
-kind create cluster --name weather-dev
-```
-
-Then reload the images and reapply the manifests:
-
-```powershell
-kind load docker-image weather-station:latest --name weather-dev
-kind load docker-image central-station:latest --name weather-dev
+# Step 5: Reapply
+kubectl apply -f k8s/persistent-volume.yaml
 kubectl apply -f k8s/kafka.yaml
 kubectl apply -f k8s/central-station.yaml
 kubectl apply -f k8s/weather-station.yaml
+
+# Step 6: Watch
+kubectl get pods -w
 ```
 
-### If you stopped the node container(s)
+```
+# ✅ Safe restart (data survives):
+kubectl delete pod <central-station-pod>
+# K8s automatically creates a new pod, PVC still there, data still there
 
-Start the Docker container(s) again:
+# ✅ Safe redeploy (data survives):
+kubectl delete -f k8s/central-station.yaml
+kubectl delete -f k8s/weather-station.yaml
+kubectl delete -f k8s/kafka.yaml
+# Then reapply — PVC still exists, data still there
 
-```powershell
-docker start <node-name>
+# ❌ Full wipe (data gone):
+kubectl delete -f k8s/
+# This deletes the PVC too — all BitCask and Parquet files gone
 ```
 
-Then verify the cluster is available:
+## Mount
 
-```powershell
-kubectl get nodes
-kubectl get pods -A
-```
+minikube mount ./Archive:/data/weather-data/parquet
+minikube mount ./data:/data/weather-data/bitcask
+minikube image load central-station:latest
 
----
 
-## Verify the cluster
+## Bash
+kubectl exec -it central-station-7565cd47dd-fk26m  -- /bin/bash
 
-Check node status:
+## Logs
+kubectl logs central-station-7565cd47dd-fk26m  -f
 
-```powershell
-kubectl get nodes
-```
+## JFR yml config
+- name: JAVA_TOOL_OPTIONS
+              value: "-XX:StartFlightRecording=duration=60s,filename=/data/profile.jfr"
 
-Check application pods:
-
-```powershell
-kubectl get pods
-```
-
----
-
-## Notes
-
-- If your cluster was deleted, you must reload your built Docker images into kind before deploying.
-- If you are using a different cluster tool than kind, adjust the commands accordingly.
-- For live log monitoring after startup, use:
-
-```powershell
-kubectl logs -l app=weather-station --tail=100 -f
-kubectl logs deployment/central-station --tail=100 -f
-```
+## Copy JFR
+kubectl cp <NEW_POD_NAME>:/data/profile.jfr ./profile.jfr -c central-station

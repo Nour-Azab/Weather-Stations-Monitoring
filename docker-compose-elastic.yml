@@ -1,0 +1,72 @@
+version: '3.8'
+
+# ── Elasticsearch + Kibana stack ──────────────────────────────────────────────
+# Run with:  docker-compose -f docker-compose-elastic.yml up -d
+#
+# Parquet files are read from ./Archive on your host machine.
+# Make sure central-station has already written some files there before
+# running the indexer (parquet-indexer service).
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Elasticsearch ────────────────────────────────────────────────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node          # no cluster needed for dev
+      - xpack.security.enabled=false        # disable TLS/auth so it's easy to use
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g     # limit RAM; raise if you have more
+      - "cluster.name=weather-cluster"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\\|yellow\"'"]
+      interval: 20s
+      timeout: 15s
+      retries: 15
+      start_period: 60s
+
+  # ── Kibana ───────────────────────────────────────────────────────────────────
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.4
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  # ── Parquet Indexer ──────────────────────────────────────────────────────────
+  # A lightweight Python service that:
+  #   1. Watches the ./Archive folder for new .parquet files
+  #   2. Reads each file with DuckDB
+  #   3. Bulk-indexes records into Elasticsearch
+  #   4. Moves processed files to ./Archive/indexed/ so they're not re-indexed
+  parquet-indexer:
+    build:
+      context: ./elastic
+      dockerfile: Dockerfile.indexer
+    container_name: parquet-indexer
+    environment:
+      - ES_HOST=http://elasticsearch:9200
+      - ES_INDEX=weather-readings
+      - ARCHIVE_DIR=/archive
+      - POLL_INTERVAL=30        # seconds between scans for new parquet files
+    volumes:
+      # Mount your Archive folder (where ParquetArchiverWorker writes files)
+      # Change the left side if your Archive folder is somewhere else
+      - ./Archive:/archive
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  es_data:
+    driver: local

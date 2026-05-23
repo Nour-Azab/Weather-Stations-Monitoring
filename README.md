@@ -103,3 +103,14 @@ bitcask/
  
 [bitcask_client.sh] ─► HTTP ─► BitcaskController ─► BitcaskStore
 ```
+ cd central-station && mvn spring-boot:run  :: for consumer
+ 
+ java -jar target/weather-station-shaded.jar:: message generator  kafka producer
+ 
+ docker exec -it weather-stations-monitoring-kafka-1 \
+  /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 \
+  --topic rain-alerts \
+  --from-beginning  :: for testing humidity alerts log
+
+  

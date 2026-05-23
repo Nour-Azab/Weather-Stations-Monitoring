@@ -28,3 +28,7 @@ data/parquet/
 *.csv
 *.jfr
 /Data
+central-station/data/bitcask
+central-station/Archive
+Archive
+data

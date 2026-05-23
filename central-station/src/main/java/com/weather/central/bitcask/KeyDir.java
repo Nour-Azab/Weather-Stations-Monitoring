@@ -1,6 +1,7 @@
 package com.weather.central.bitcask;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.Set;
 
 public class KeyDir {
     // in-memory hash index
@@ -21,6 +22,10 @@ public class KeyDir {
         // Atomically remove the entry to prevent race conditions with background compaction
         keyMap.remove(key);
     }
+
+    public Set<String> getAllKeys() {
+    return keyMap.keySet();
+}
 
     public void updateEntry(String key, String fileId, long valueOffset, int valueSize, long timestamp) {
         keyMap.compute(key, (k, existing) -> {

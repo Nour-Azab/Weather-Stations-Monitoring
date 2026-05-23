@@ -59,10 +59,13 @@ spec:
               value: /data/bitcask
             - name: PARQUET_STORAGE_PATH
               value: /data/parquet
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:StartFlightRecording=settings=profile,duration=60s,filename=/data/profile.jfr,jdk.FileWrite#threshold=0ms,jdk.FileRead#threshold=0ms,jdk.SocketRead#threshold=0ms,jdk.SocketWrite#threshold=0ms"
           volumeMounts:
             - name: data
               mountPath: /data
 
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:        # ← changed from emptyDir: {}
+            claimName: central-data-pvc
