@@ -6,9 +6,9 @@ spring:
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      enable-auto-commit: false  # ← ADD THIS
+      enable-auto-commit: false  # Disable auto-commit for manual acknowledgment
     listener:
-      ack-mode: manual  # ← ADD THIS — you control when to commit
+      ack-mode: manual # manual ack for when parquet is written successfully
 server:
   port: 8080
 

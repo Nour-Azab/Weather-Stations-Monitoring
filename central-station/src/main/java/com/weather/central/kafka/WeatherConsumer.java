@@ -27,15 +27,12 @@ public class WeatherConsumer {
             logger.info("Received message from station {}", weatherMessage.getStationId());
             logger.info("Message details: {}", weatherMessage);
 
-            // --- THE STORAGE INTERFACE CHOICE ---
 
-            // Choice A: Track latest state of the station (Overwrites old logs on
+            //  Track latest state of the station (Overwrites old logs on
             // compaction)
             String key = "station_" + weatherMessage.getStationId();
 
-            // Choice B: Timeseries Tracking (Keeps historical entries permanently)
-            // String key = "station_" + weatherMessage.getStationId() + "_" +
-            // weatherMessage.getSno();
+
 
             // Store the raw JSON string directly into Bitcask
             bitcaskService.put(key, message);

@@ -55,8 +55,7 @@ public class WeatherStation {
         scheduler.scheduleAtFixedRate(() -> {
 
             String message = MessageGenerator.generate(stationId);
-
-            // Problem 4 fix: check for null (10% drop returns null)
+            
             if (message == null) {
                 System.out.println("Message dropped (10% rate)");
                 return;
